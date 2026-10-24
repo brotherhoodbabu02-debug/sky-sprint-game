@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#101827">
+<title>Sky Sprint - Endless Runner</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: #101827; color: #f7fbff; font-family: system-ui, Arial, sans-serif;
+    padding: 14px; overscroll-behavior: none;
+  }
+  .game-wrap { width: min(100%, 520px); }
+  header { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; }
+  h1 { font-size: clamp(20px, 5vw, 28px); margin:0; letter-spacing:.5px; }
+  .score-box { background:#1c2940; border:1px solid #354662; padding:8px 12px; border-radius:12px; font-weight:700; }
+  canvas {
+    display:block; width:100%; height:auto; aspect-ratio: 420 / 620;
+    border-radius:20px; border:2px solid #354662; background:#8bd8ff;
+    touch-action: manipulation; box-shadow:0 16px 40px #0005;
+  }
+  .controls { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px; }
+  button {
+    border:0; border-radius:14px; padding:14px 10px; color:#101827;
+    background:#a8f06a; font-size:16px; font-weight:800; cursor:pointer;
+    touch-action: manipulation;
+  }
+  button.secondary { background:#f7fbff; }
+  button:active { transform:scale(.98); }
+  .hint { color:#b8c7dc; font-size:13px; line-height:1.45; text-align:center; margin:10px 4px 0; }
+</style>
+</head>
+<body>
+<div class="game-wrap">
+  <header>
+    <h1>🌤️ Sky Sprint</h1>
+    <div class="score-box">Score: <span id="score">0</span></div>
+  </header>
+  <canvas id="game" width="420" height="620" aria-label="Endless runner game"></canvas>
+  <div class="controls">
+    <button id="jumpBtn">⬆️ JUMP</button>
+    <button id="restartBtn" class="secondary">↻ RESTART</button>
+  </div>
+  <p class="hint">Tap the game or press JUMP to leap over rocks. Avoid obstacles and keep running!</p>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const jumpBtn = document.getElementById('jumpBtn');
+  const restartBtn = document.getElementById('restartBtn');
+
+  const W = canvas.width, H = canvas.height;
+  const groundY = 500;
+  let player, obstacles, score, speed, spawnTimer, running, gameOver, lastTime, clouds, groundOffset;
+
+  function reset() {
+    player = { x: 76, y: groundY - 48, w: 34, h: 48, vy: 0, onGround: true };
+    obstacles = [];
+    score = 0;
+    speed = 250;
+    spawnTimer = 0.8;
+    running = true;
+    gameOver = false;
+    lastTime = 0;
+    groundOffset = 0;
+    clouds = [{x:45,y:100,s:1},{x:240,y:155,s:.75},{x:355,y:75,s:.9}];
+    scoreEl.textContent = '0';
+    draw();
+  }
+
+  function jump() {
+    if (gameOver) { reset(); return; }
+    if (player.onGround) {
+      player.vy = -610;
+      player.onGround = false;
+    }
+  }
+
+  function addObstacle() {
+    const tall = Math.random() < 0.35;
+    const h = tall ? 62 : 38;
+    const w = tall ? 34 : 42;
+    obstacles.push({ x: W + 15, y: groundY - h, w, h, tall });
+  }
+
+  function roundedRect(x, y, w, h, r, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, r);
+    ctx.fill();
+  }
+
+  function drawCloud(c) {
+    ctx.fillStyle = '#ffffffcc';
+    ctx.beginPath();
+    ctx.ellipse(c.x, c.y, 24*c.s, 12*c.s, 0, 0, Math.PI*2);
+    ctx.ellipse(c.x-15*c.s, c.y+4*c.s, 14*c.s, 10*c.s, 0, 0, Math.PI*2);
+    ctx.ellipse(c.x+15*c.s, c.y+3*c.s, 16*c.s, 11*c.s, 0, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  function draw() {
+    // Sky
+    const sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#66c7ff');
+    sky.addColorStop(1, '#d6f6ff');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+
+    // Sun and clouds
+    ctx.fillStyle = '#fff3a6';
+    ctx.beginPath(); ctx.arc(342, 84, 32, 0, Math.PI*2); ctx.fill();
+    clouds.forEach(drawCloud);
+
+    // Far hills
+    ctx.fillStyle = '#80d6a0';
+    ctx.beginPath(); ctx.moveTo(0, 400);
+    for (let x=0; x<=W; x+=35) ctx.lineTo(x, 380 + Math.sin((x+groundOffset*.12)/45)*24);
+    ctx.lineTo(W, groundY); ctx.lineTo(0, groundY); ctx.closePath(); ctx.fill();
+
+    // Ground
+    ctx.fillStyle = '#31985b'; ctx.fillRect(0, groundY, W, H-groundY);
+    ctx.fillStyle = '#236c45'; ctx.fillRect(0, groundY, W, 9);
+    ctx.strokeStyle = '#a8f06a'; ctx.lineWidth = 4;
+    for (let x = -(groundOffset % 42); x < W; x += 42) {
+      ctx.beginPath(); ctx.moveTo(x, groundY+28); ctx.lineTo(x+20, groundY+28); ctx.stroke();
+    }
+
+    // Obstacles
+    obstacles.forEach(o => {
+      if (o.tall) {
+        roundedRect(o.x, o.y, o.w, o.h, 7, '#9b5b35');
+        ctx.fillStyle = '#c9824d';
+        ctx.fillRect(o.x+6, o.y+8, 7, o.h-13);
+        ctx.fillStyle = '#71402b';
+        ctx.fillRect(o.x+o.w-8, o.y+6, 4, o.h-10);
+      } else {
+        ctx.fillStyle = '#6d7787';
+        ctx.beginPath();
+        ctx.moveTo(o.x, groundY); ctx.lineTo(o.x+8, o.y+10);
+        ctx.lineTo(o.x+o.w-10, o.y); ctx.lineTo(o.x+o.w, groundY);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#aeb8c5';
+        ctx.beginPath(); ctx.moveTo(o.x+10,o.y+13); ctx.lineTo(o.x+o.w-13,o.y+7); ctx.lineTo(o.x+o.w-18,o.y+24); ctx.closePath(); ctx.fill();
+      }
+    });
+
+    // Player: cheerful runner
+    const px = player.x, py = player.y;
+    // legs
+    ctx.strokeStyle = '#253b8f'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(px+12, py+36); ctx.lineTo(px+7, py+47); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(px+24, py+36); ctx.lineTo(px+30, py+46); ctx.stroke();
+    // body
+    roundedRect(px+5, py+16, 26, 25, 8, '#7357ff');
+    // face
+    ctx.fillStyle = '#ffd2a6';
+    ctx.beginPath(); ctx.arc(px+20, py+11, 12, 0, Math.PI*2); ctx.fill();
+    // hair
+    ctx.fillStyle = '#49352d';
+    ctx.beginPath(); ctx.arc(px+18, py+7, 11, Math.PI, Math.PI*2); ctx.fill();
+    // eye
+    ctx.fillStyle = '#253047';
+    ctx.beginPath(); ctx.arc(px+24, py+11, 1.8, 0, Math.PI*2); ctx.fill();
+
+    if (!running) {
+      ctx.fillStyle = '#101827bb'; ctx.fillRect(0,0,W,H);
+      roundedRect(35, 220, W-70, 175, 20, '#17243b');
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 30px system-ui';
+      ctx.fillText('GAME OVER', W/2, 275);
+      ctx.font = 'bold 22px system-ui'; ctx.fillStyle = '#a8f06a';
+      ctx.fillText('Score: ' + Math.floor(score), W/2, 315);
+      ctx.font = '16px system-ui'; ctx.fillStyle = '#e1e9f5';
+      ctx.fillText('Tap RESTART to play again', W/2, 355);
+    }
+  }
+
+  function update(dt) {
+    if (!running) return;
+    score += dt * 10;
+    speed = Math.min(470, 250 + score * 1.5);
+    scoreEl.textContent = Math.floor(score);
+    groundOffset += speed * dt;
+
+    clouds.forEach(c => {
+      c.x -= speed * dt * .12;
+      if (c.x < -45) c.x = W + 45;
+    });
+
+    player.vy += 1550 * dt;
+    player.y += player.vy * dt;
+    if (player.y + player.h >= groundY) {
+      player.y = groundY - player.h;
+      player.vy = 0;
+      player.onGround = true;
+    }
+
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) {
+      addObstacle();
+      spawnTimer = Math.max(.72, 1.35 - score/180) + Math.random()*.45;
+    }
+
+    obstacles.forEach(o => o.x -= speed * dt);
+    obstacles = obstacles.filter(o => o.x + o.w > -10);
+
+    // Slightly forgiving collision boxes
+    const p = {x:player.x+5, y:player.y+5, w:player.w-10, h:player.h-7};
+    for (const o of obstacles) {
+      if (p.x < o.x+o.w-5 && p.x+p.w > o.x+5 && p.y < o.y+o.h && p.y+p.h > o.y+5) {
+        running = false; gameOver = true; break;
+      }
+    }
+  }
+
+  function frame(time) {
+    if (!lastTime) lastTime = time;
+    const dt = Math.min((time-lastTime)/1000, .035);
+    lastTime = time;
+    update(dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  canvas.addEventListener('pointerdown', jump);
+  jumpBtn.addEventListener('click', jump);
+  restartBtn.addEventListener('click', reset);
+  window.addEventListener('keydown', e => {
+    if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); jump(); }
+  });
+
+  reset();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
